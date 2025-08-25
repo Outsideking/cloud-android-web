@@ -1,16 +1,16 @@
 {
-  "name": "cloud-android-backend",
+  "name": "cloud-android-frontend",
   "version": "1.0.0",
-  "main": "server.js",
-  "scripts": {
-    "start": "node server.js"
-  },
+  "private": true,
   "dependencies": {
-    "bcrypt": "^5.1.0",
-    "cors": "^2.8.5",
-    "express": "^4.18.2",
-    "jsonwebtoken": "^9.0.0",
-    "mongoose": "^7.0.0",
-    "kubernetes-client": "^10.0.0"
+    "axios": "^1.4.0",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "react-scripts": "5.0.1",
+    "novnc": "^1.4.0"
+  },
+  "scripts": {
+    "start": "react-scripts start",
+    "build": "react-scripts build"
   }
 }
