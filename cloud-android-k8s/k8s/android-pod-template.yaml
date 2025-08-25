@@ -1,1 +1,10 @@
-
+apiVersion: v1
+kind: Pod
+metadata:
+  name: android-template
+  labels: { app: cloud-android }
+spec:
+  containers:
+    - name: android-emulator
+      image: cloud-android-image
+      ports: [{ containerPort: 5901 },{ containerPort: 6080 }]
