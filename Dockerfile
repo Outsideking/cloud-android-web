@@ -1,30 +1,30 @@
-FROM ubuntu:22.04
+FROM ubuntu:20.04
 
-# ติดตั้ง dependencies
+ENV DEBIAN_FRONTEND=noninteractive
+
+# ติดตั้ง dependency
 RUN apt-get update && apt-get install -y \
-    wget unzip openjdk-11-jdk qemu-kvm libvirt-daemon-system \
-    libvirt-clients bridge-utils virt-manager novnc websockify \
-    x11vnc xvfb
+    wget unzip curl git supervisor \
+    libglu1-mesa openjdk-8-jdk \
+    xfce4 xfce4-goodies x11vnc xvfb \
+    novnc websockify \
+    && rm -rf /var/lib/apt/lists/*
 
-# ติดตั้ง Android SDK Command Line Tools
-RUN mkdir -p /android-sdk && cd /android-sdk \
-    && wget https://dl.google.com/android/repository/commandlinetools-linux-9477386_latest.zip \
-    && unzip commandlinetools-linux-9477386_latest.zip \
-    && rm commandlinetools-linux-9477386_latest.zip
+# ติดตั้ง Android SDK + Emulator
+RUN mkdir -p /opt/android-sdk && cd /opt/android-sdk \
+    && wget https://dl.google.com/android/repository/commandlinetools-linux-8512546_latest.zip -O cmdtools.zip \
+    && unzip cmdtools.zip -d cmdline-tools && rm cmdtools.zip \
+    && mkdir -p cmdline-tools/latest \
+    && mv cmdline-tools/cmdline-tools/* cmdline-tools/latest/ \
+    && yes | cmdline-tools/latest/bin/sdkmanager --sdk_root=/opt/android-sdk "platform-tools" "emulator" "system-images;android-30;google_apis;arm64-v8a" "platforms;android-30"
 
-ENV ANDROID_SDK_ROOT=/android-sdk
-ENV PATH=$PATH:$ANDROID_SDK_ROOT/cmdline-tools/bin:$ANDROID_SDK_ROOT/platform-tools
+# สร้าง Android Emulator AVD (ใช้ ARM image แทน x86)
+RUN echo "no" | /opt/android-sdk/cmdline-tools/latest/bin/avdmanager create avd -n test -k "system-images;android-30;google_apis;arm64-v8a" --device "pixel"
 
-# ติดตั้ง emulator และ system image
-RUN yes | sdkmanager --licenses
-RUN sdkmanager "platform-tools" "emulator" "system-images;android-33;google_apis;x86_64"
+# คัดลอก start script
+COPY start.sh /start.sh
+RUN chmod +x /start.sh
 
-# สร้าง Android Virtual Device
-RUN echo "no" | avdmanager create avd -n cloudandroid -k "system-images;android-33;google_apis;x86_64"
-
-# เปิด VNC + WebSockify
 EXPOSE 5901 6080
-CMD Xvfb :0 -screen 0 1280x720x16 & \
-    emulator -avd cloudandroid -noaudio -no-boot-anim -gpu swiftshader_indirect -no-window & \
-    x11vnc -display :0 -forever -nopw -shared -rfbport 5901 & \
-    websockify -D 6080 localhost:5901 && tail -f /dev/null
+
+CMD ["/start.sh"]
