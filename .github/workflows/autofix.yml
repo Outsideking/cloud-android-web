@@ -1,0 +1,37 @@
+name: Auto Fix Cloud Android
+
+on:
+  workflow_dispatch: # กดรันเองใน Actions ได้
+  push:
+    branches: [ "main" ]
+
+jobs:
+  autofix:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v3
+
+      - name: Apply autofix
+        run: |
+          echo "🔧 Patching Dockerfile, start.sh, docker-compose.yml"
+          # เขียนไฟล์ใหม่ที่แก้แล้ว
+          cat > cloud-android/Dockerfile <<'EOF'
+          [โค้ด Dockerfile ที่ผมแก้แล้ว]
+          EOF
+
+          cat > cloud-android/start.sh <<'EOF'
+          [โค้ด start.sh ที่ผมแก้แล้ว]
+          EOF
+
+          cat > docker-compose.yml <<'EOF'
+          [โค้ด docker-compose.yml ที่ผมแก้แล้ว]
+          EOF
+
+      - name: Commit & Push
+        run: |
+          git config --global user.name "autofix-bot"
+          git config --global user.email "autofix@users.noreply.github.com"
+          git add .
+          git commit -m "Auto fix Dockerfile/start.sh/docker-compose"
+          git push origin main
