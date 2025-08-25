@@ -1,33 +1,22 @@
-version: "3.8"
+version: '3.8'
 services:
-  db:
-    image: postgres:15
-    environment:
-      POSTGRES_USER: appuser
-      POSTGRES_PASSWORD: apppass
-      POSTGRES_DB: appdb
-    ports: ["5432:5432"]
-    volumes: [dbdata:/var/lib/postgresql/data]
+  android:
+    build: ./cloud-android
+    ports:
+      - "6080:6080"
   backend:
-    build: ./backend
-    environment:
-      DB_HOST: db
-      DB_USER: appuser
-      DB_PASS: apppass
-      DB_NAME: appdb
-      JWT_SECRET: "CHANGE_ME"
-      STRIPE_SECRET_KEY: "sk_test_xxx"
-      CLOUD_ANDROID_HOST: "http://localhost"
-      CLOUD_ANDROID_PORT: "6080"
-      ANDROID_IMAGE_TAG: "latest"
-    ports: ["4000:4000"]
-    depends_on: [db]
+    image: node:18
+    working_dir: /app
+    volumes:
+      - ./backend:/app
+    command: npm start
+    ports:
+      - "4000:4000"
   frontend:
     build: ./frontend
-    ports: ["3000:80"]
-    depends_on: [backend]
-  cloud-android-web:
-    build: ./cloud-android-web
-    ports: ["6080:6080"]
-volumes:
-  dbdata:
+    ports:
+      - "3000:3000"
+  mongo:
+    image: mongo
+    ports:
+      - "27017:27017"
