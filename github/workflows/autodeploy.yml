@@ -1,0 +1,111 @@
+name: Auto Fix + Deploy Cloud Android
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ "main" ]
+
+permissions:
+  contents: write
+
+jobs:
+  build-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      # ✅ ใช้ local checkout (ไม่ใช้ actions/checkout ที่ติด restrict)
+      - name: Checkout code
+        run: |
+          rm -rf repo
+          git clone https://github.com/${GITHUB_REPOSITORY}.git repo
+          cd repo
+          git checkout $GITHUB_REF_NAME
+
+      - name: Apply autofix
+        run: |
+          cd repo
+          echo "🔧 Patching Dockerfile, start.sh, docker-compose.yml"
+          
+          # Dockerfile
+          cat > cloud-android/Dockerfile <<'EOF'
+          FROM ubuntu:20.04
+
+          ENV DEBIAN_FRONTEND=noninteractive
+
+          RUN apt-get update && apt-get install -y \
+              wget unzip openjdk-11-jdk \
+              libgl1-mesa-dev libx11-6 xvfb x11vnc fluxbox \
+              novnc websockify \
+              && rm -rf /var/lib/apt/lists/*
+
+          RUN mkdir -p /opt/android-sdk && cd /opt \
+              && wget https://dl.google.com/android/repository/commandlinetools-linux-8512546_latest.zip -O cmdline-tools.zip \
+              && unzip cmdline-tools.zip -d android-sdk \
+              && rm cmdline-tools.zip
+
+          ENV ANDROID_HOME=/opt/android-sdk
+          ENV PATH=$ANDROID_HOME/cmdline-tools/bin:$ANDROID_HOME/platform-tools:$PATH
+
+          RUN yes | sdkmanager --licenses || true
+          RUN sdkmanager "platform-tools" "platforms;android-30" "system-images;android-30;google_apis;x86_64" "emulator"
+
+          RUN echo "no" | avdmanager create avd -n test -k "system-images;android-30;google_apis;x86_64" --device "pixel"
+
+          COPY start.sh /start.sh
+          RUN chmod +x /start.sh
+
+          EXPOSE 6080
+          CMD ["/start.sh"]
+          EOF
+
+          # start.sh
+          cat > cloud-android/start.sh <<'EOF'
+          #!/bin/bash
+          export DISPLAY=:0
+          Xvfb :0 -screen 0 1280x720x16 &
+          fluxbox &
+          x11vnc -forever -nopw -display :0 -rfbport 5900 &
+          websockify --web=/usr/share/novnc/ 6080 localhost:5900 &
+          emulator -avd test -noaudio -no-boot-anim -accel on -gpu swiftshader_indirect &
+          tail -f /dev/null
+          EOF
+
+          # docker-compose.yml
+          cat > docker-compose.yml <<'EOF'
+          version: '3.8'
+          services:
+            android:
+              build: ./cloud-android
+              ports:
+                - "6080:6080"
+            backend:
+              image: node:18
+              working_dir: /app
+              volumes:
+                - ./backend:/app
+              command: npm start
+              ports:
+                - "4000:4000"
+            frontend:
+              build: ./frontend
+              ports:
+                - "3000:3000"
+            mongo:
+              image: mongo
+              ports:
+                - "27017:27017"
+          EOF
+
+      - name: Commit & Push changes
+        run: |
+          cd repo
+          git config --global user.name "autofix-bot"
+          git config --global user.email "autofix@users.noreply.github.com"
+          git add .
+          git commit -m "Auto fix and deploy" || echo "No changes"
+          git push https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${GITHUB_REPOSITORY}.git HEAD:main
+
+      - name: Deploy with Docker Compose
+        run: |
+          cd repo
+          docker-compose up -d --build
