@@ -1,24 +1,30 @@
-FROM ubuntu:22.04
+FROM ubuntu:20.04
+
+ENV DEBIAN_FRONTEND=noninteractive
 
 RUN apt-get update && apt-get install -y \
-    wget unzip openjdk-11-jdk x11vnc xvfb novnc websockify qemu-kvm
+    wget unzip openjdk-11-jdk \
+    libgl1-mesa-dev libx11-6 xvfb x11vnc fluxbox \
+    novnc websockify \
+    && rm -rf /var/lib/apt/lists/*
 
-# Android SDK
-RUN mkdir -p /android-sdk && cd /android-sdk \
-    && wget https://dl.google.com/android/repository/commandlinetools-linux-9477386_latest.zip \
-    && unzip commandlinetools-linux-9477386_latest.zip \
-    && rm *.zip
+# ติดตั้ง Android SDK
+RUN mkdir -p /opt/android-sdk && cd /opt \
+    && wget https://dl.google.com/android/repository/commandlinetools-linux-8512546_latest.zip -O cmdline-tools.zip \
+    && unzip cmdline-tools.zip -d android-sdk \
+    && rm cmdline-tools.zip
 
-ENV ANDROID_SDK_ROOT=/android-sdk
-ENV PATH=$PATH:$ANDROID_SDK_ROOT/cmdline-tools/bin:$ANDROID_SDK_ROOT/platform-tools
+ENV ANDROID_HOME=/opt/android-sdk
+ENV PATH=$ANDROID_HOME/cmdline-tools/bin:$ANDROID_HOME/platform-tools:$PATH
 
-RUN yes | sdkmanager --licenses
-RUN sdkmanager "platform-tools" "emulator" "system-images;android-33;google_apis;x86_64"
-RUN echo "no" | avdmanager create avd -n cloudandroid -k "system-images;android-33;google_apis;x86_64"
+RUN yes | sdkmanager --licenses || true
+RUN sdkmanager "platform-tools" "platforms;android-30" "system-images;android-30;google_apis;x86_64" "emulator"
 
-EXPOSE 5901 6080
+# สร้าง AVD
+RUN echo "no" | avdmanager create avd -n test -k "system-images;android-30;google_apis;x86_64" --device "pixel"
 
-CMD Xvfb :0 -screen 0 1280x720x16 & \
-    emulator -avd cloudandroid -noaudio -no-boot-anim -gpu swiftshader_indirect -no-window & \
-    x11vnc -display :0 -forever -nopw -shared -rfbport 5901 & \
-    websockify -D 6080 localhost:5901 && tail -f /dev/null
+COPY start.sh /start.sh
+RUN chmod +x /start.sh
+
+EXPOSE 6080
+CMD ["/start.sh"]
