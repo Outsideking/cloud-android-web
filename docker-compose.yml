@@ -1,15 +1,19 @@
 version: '3.8'
 services:
   android:
-    build: .
+    build: ./cloud-android
     ports:
       - "6080:6080"
   backend:
-    build: ../backend
+    image: node:18
+    working_dir: /app
+    volumes:
+      - ./backend:/app
+    command: npm start
     ports:
       - "4000:4000"
   frontend:
-    build: ../frontend
+    build: ./frontend
     ports:
       - "3000:3000"
   mongo:
