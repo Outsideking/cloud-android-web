@@ -1,23 +1,22 @@
-version: "3.8"
+version: '3.8'
 services:
-  # --- existing scanzaclip services (db, backend, frontend) ---
-
-  cloud-android-web:
-    build:
-      context: ./backend/services/cloud-android-web
-      dockerfile: Dockerfile
-    container_name: scanzaclip_cloud_android
+  android:
+    build: ./cloud-android
     ports:
-      - "5000:5000"       # backend API / webhooks (internal)
-      - "6080:6080"       # optional local noVNC for dev (prod via ALB)
-    environment:
-      - NODE_ENV=production
-      - PAYPAL_CLIENT_ID=${PAYPAL_CLIENT_ID}
-      - PAYPAL_CLIENT_SECRET=${PAYPAL_CLIENT_SECRET}
-      - PAYPAL_ENV=${PAYPAL_ENV}
-      - OPN_PUBLIC_KEY=${OPN_PUBLIC_KEY}
-      - OPN_SECRET_KEY=${OPN_SECRET_KEY}
-      - WEBHOOK_URL_BASE=${WEBHOOK_URL_BASE}
-    depends_on:
-      - db   # ถ้าใช้ shared db
-    restart: unless-stopped
+      - "6080:6080"
+  backend:
+    image: node:18
+    working_dir: /app
+    volumes:
+      - ./backend:/app
+    command: npm start
+    ports:
+      - "4000:4000"
+  frontend:
+    build: ./frontend
+    ports:
+      - "3000:3000"
+  mongo:
+    image: mongo
+    ports:
+      - "27017:27017"
