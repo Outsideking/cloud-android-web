@@ -1,0 +1,6 @@
+cd /path/to/scanzaclip
+git submodule add https://github.com/Outsideking/cloud-android-web.git backend/services/cloud-android-web
+git submodule update --init --recursive
+git add .gitmodules backend/services/cloud-android-web
+git commit -m "Add cloud-android-web as submodule (ลูกชาย: อเมริกาจีน)"
+git push
