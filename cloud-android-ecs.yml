@@ -1,0 +1,273 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Cloud Android Web on ECS Fargate with ALB, ECR, VPC (ap-southeast-2)
+
+Parameters:
+  AppName: { Type: String, Default: cloud-android-web }
+  VpcCidr: { Type: String, Default: 10.20.0.0/16 }
+  PublicSubnet1Cidr: { Type: String, Default: 10.20.1.0/24 }
+  PublicSubnet2Cidr: { Type: String, Default: 10.20.2.0/24 }
+  ContainerPort: { Type: Number, Default: 5000 }
+  DesiredCount: { Type: Number, Default: 1 }
+  Cpu: { Type: String, Default: 512, AllowedValues: [256,512,1024,2048,4096] }
+  Memory: { Type: String, Default: 1024, AllowedValues: [512,1024,2048,3072,4096,5120,6144,7168,8192] }
+  # ใส่ค่า env จาก SSM Parameter Store/Secrets Manager โดยอ้าง ARN/ชื่อพารามิเตอร์
+  PayPalClientIdParam: { Type: String, Description: SSM parameter name or secret ARN, Default: /cloud-android/PAYPAL_CLIENT_ID }
+  PayPalClientSecretParam: { Type: String, Description: SSM parameter/secret, Default: /cloud-android/PAYPAL_CLIENT_SECRET }
+  PayPalEnvParam: { Type: String, Default: /cloud-android/PAYPAL_ENV }
+  OpnPublicKeyParam: { Type: String, Default: /cloud-android/OPN_PUBLIC_KEY }
+  OpnSecretKeyParam: { Type: String, Default: /cloud-android/OPN_SECRET_KEY }
+  WebhookBaseParam: { Type: String, Default: /cloud-android/WEBHOOK_URL_BASE }
+
+Mappings:
+  RegionMap:
+    ap-southeast-2:
+      AMI: "ami-ffffffff" # not used (Fargate)
+
+Resources:
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: !Ref VpcCidr
+      EnableDnsHostnames: true
+      EnableDnsSupport: true
+      Tags: [{ Key: Name, Value: !Sub '${AppName}-vpc' }]
+
+  IGW:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags: [{ Key: Name, Value: !Sub '${AppName}-igw' }]
+
+  AttachIgw:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      InternetGatewayId: !Ref IGW
+      VpcId: !Ref VPC
+
+  PublicSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: !Ref PublicSubnet1Cidr
+      MapPublicIpOnLaunch: true
+      AvailabilityZone: !Select [0, !GetAZs '']
+      Tags: [{ Key: Name, Value: !Sub '${AppName}-public-1' }]
+
+  PublicSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: !Ref PublicSubnet2Cidr
+      MapPublicIpOnLaunch: true
+      AvailabilityZone: !Select [1, !GetAZs '']
+      Tags: [{ Key: Name, Value: !Sub '${AppName}-public-2' }]
+
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags: [{ Key: Name, Value: !Sub '${AppName}-public-rt' }]
+
+  PublicRoute:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref IGW
+
+  Assoc1:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnet1
+      RouteTableId: !Ref PublicRouteTable
+
+  Assoc2:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnet2
+      RouteTableId: !Ref PublicRouteTable
+
+  ALBSG:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: ALB SG
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+      Tags: [{ Key: Name, Value: !Sub '${AppName}-alb-sg' }]
+
+  ServiceSG:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Service SG
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: !Ref ContainerPort
+          ToPort: !Ref ContainerPort
+          SourceSecurityGroupId: !Ref ALBSG
+      Tags: [{ Key: Name, Value: !Sub '${AppName}-svc-sg' }]
+
+  ALB:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Name: !Sub '${AppName}-alb'
+      Scheme: internet-facing
+      Type: application
+      SecurityGroups: [!Ref ALBSG]
+      Subnets: [!Ref PublicSubnet1, !Ref PublicSubnet2]
+
+  TargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: !Sub '${AppName}-tg'
+      VpcId: !Ref VPC
+      Protocol: HTTP
+      Port: !Ref ContainerPort
+      TargetType: ip
+      HealthCheckPath: /
+      Matcher: { HttpCode: '200-499' }
+
+  Listener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      LoadBalancerArn: !Ref ALB
+      Port: 80
+      Protocol: HTTP
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref TargetGroup
+
+  ECRRepo:
+    Type: AWS::ECR::Repository
+    Properties:
+      RepositoryName: !Ref AppName
+      ImageScanningConfiguration: { ScanOnPush: true }
+      LifecyclePolicy:
+        LifecyclePolicyText: |
+          {
+            "rules": [{
+              "rulePriority": 1,
+              "description": "keep last 10",
+              "selection": { "tagStatus": "any", "countType": "imageCountMoreThan", "countNumber": 10 },
+              "action": { "type": "expire" }
+            }]
+          }
+
+  LogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties: { LogGroupName: !Sub '/ecs/${AppName}', RetentionInDays: 14 }
+
+  ExecRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${AppName}-exec-role'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: { Service: ecs-tasks.amazonaws.com }
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+
+  TaskRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${AppName}-task-role'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: { Service: ecs-tasks.amazonaws.com }
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: ReadParams
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ssm:GetParameter
+                  - ssm:GetParameters
+                  - ssm:GetParametersByPath
+                  - secretsmanager:GetSecretValue
+                Resource: "*"
+
+  Cluster:
+    Type: AWS::ECS::Cluster
+    Properties:
+      ClusterName: !Sub '${AppName}-cluster'
+
+  TaskDef:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: !Sub '${AppName}-task'
+      Cpu: !Ref Cpu
+      Memory: !Ref Memory
+      NetworkMode: awsvpc
+      RequiresCompatibilities: [FARGATE]
+      ExecutionRoleArn: !GetAtt ExecRole.Arn
+      TaskRoleArn: !GetAtt TaskRole.Arn
+      ContainerDefinitions:
+        - Name: !Ref AppName
+          Image: !Sub '${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${AppName}:latest'
+          Essential: true
+          PortMappings:
+            - ContainerPort: !Ref ContainerPort
+              Protocol: tcp
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref LogGroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: ecs
+          Environment:
+            - Name: NODE_ENV
+              Value: production
+          Secrets:
+            - Name: PAYPAL_CLIENT_ID
+              ValueFrom: !Ref PayPalClientIdParam
+            - Name: PAYPAL_CLIENT_SECRET
+              ValueFrom: !Ref PayPalClientSecretParam
+            - Name: PAYPAL_ENV
+              ValueFrom: !Ref PayPalEnvParam
+            - Name: OPN_PUBLIC_KEY
+              ValueFrom: !Ref OpnPublicKeyParam
+            - Name: OPN_SECRET_KEY
+              ValueFrom: !Ref OpnSecretKeyParam
+            - Name: WEBHOOK_URL_BASE
+              ValueFrom: !Ref WebhookBaseParam
+
+  Service:
+    Type: AWS::ECS::Service
+    DependsOn: Listener
+    Properties:
+      ServiceName: !Sub '${AppName}-service'
+      Cluster: !Ref Cluster
+      DesiredCount: !Ref DesiredCount
+      LaunchType: FARGATE
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: ENABLED
+          SecurityGroups: [!Ref ServiceSG]
+          Subnets: [!Ref PublicSubnet1, !Ref PublicSubnet2]
+      TaskDefinition: !Ref TaskDef
+      LoadBalancers:
+        - ContainerName: !Ref AppName
+          ContainerPort: !Ref ContainerPort
+          TargetGroupArn: !Ref TargetGroup
+
+Outputs:
+  ALBDNS:
+    Description: Public DNS of Application Load Balancer
+    Value: !GetAtt ALB.DNSName
+  ECRRepoUri:
+    Description: ECR repo URI
+    Value: !Sub '${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${AppName}'
+  ClusterName:
+    Value: !Ref Cluster
+  ServiceName:
+    Value: !Ref Service
